@@ -7,3 +7,5 @@ backend/storage/history.json
 backend/**/__pycache__/
 *.pyc
 .env
+frontend/.env.production
+frontend/.env.local

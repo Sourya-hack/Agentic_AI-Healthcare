@@ -162,6 +162,14 @@ npm run build
 
 Deploy the generated `frontend/dist` folder to any static host and set `VITE_API_BASE_URL` to the deployed backend URL before building.
 
+#### Frontend environment strategy
+
+- Keep a committed template at `frontend/.env.production.example`.
+- Create your real file locally as `frontend/.env.production` (gitignored).
+- Set:
+  - `VITE_API_BASE_URL=https://<your-backend-domain>/api`
+- For Netlify/Render frontend, set the same variable in the platform environment settings (recommended over committing secrets/config).
+
 ## Important runtime expectations
 
 - `Train Model`, `Inference`, and `Grad-CAM` require the PyTorch stack and valid image/data paths.
