@@ -143,6 +143,8 @@ This repo includes `render.yaml` for one-click backend deployment.
 5. Use this backend URL in Netlify:
    - `VITE_API_BASE_URL=https://<your-render-service>.onrender.com/api`
 
+The same `render.yaml` also includes an optional static frontend service (`minorproject2-frontend`) as a fallback to Netlify. Set `VITE_API_BASE_URL` in Render frontend service environment variables before deploying it.
+
 Example with Waitress:
 
 ```powershell
