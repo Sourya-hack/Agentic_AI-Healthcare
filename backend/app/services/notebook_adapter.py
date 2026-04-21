@@ -432,6 +432,44 @@ class NotebookService:
 
     def prepare_dataset_metadata(self, csv_file: str, train_list_file: str | None = None, test_list_file: str | None = None) -> dict[str, Any]:
         df = pd.read_csv(csv_file)
+        # Accept common CSV header variants (case/spacing/underscore differences).
+        normalized_to_original = {re.sub(r"[^a-z0-9]+", "", str(col).strip().lower()): col for col in df.columns}
+        required_aliases = {
+            "Finding Labels": ["findinglabels", "findinglabel", "labels", "finding"],
+            "Image Index": ["imageindex", "image", "imageid", "image_name", "imagefilename"],
+        }
+        optional_aliases = {
+            "Patient Age": ["patientage", "age", "patient_age"],
+            "Patient Gender": ["patientgender", "gender", "patient_gender", "sex"],
+        }
+        rename_map: dict[str, str] = {}
+        missing_required: list[str] = []
+        missing_optional: list[str] = []
+        for canonical, aliases in required_aliases.items():
+            existing = next((normalized_to_original[a] for a in aliases if a in normalized_to_original), None)
+            if existing is None:
+                missing_required.append(canonical)
+            elif existing != canonical:
+                rename_map[existing] = canonical
+        for canonical, aliases in optional_aliases.items():
+            existing = next((normalized_to_original[a] for a in aliases if a in normalized_to_original), None)
+            if existing is None:
+                missing_optional.append(canonical)
+            elif existing != canonical:
+                rename_map[existing] = canonical
+        if rename_map:
+            df = df.rename(columns=rename_map)
+        if missing_required:
+            raise RuntimeError(
+                "CSV is missing required columns: "
+                + ", ".join(missing_required)
+                + ". Available columns: "
+                + ", ".join(map(str, df.columns))
+            )
+        if "Patient Age" not in df.columns:
+            df["Patient Age"] = 0
+        if "Patient Gender" not in df.columns:
+            df["Patient Gender"] = "Unknown"
         for disease in DISEASE_LABELS:
             df[disease] = df["Finding Labels"].apply(lambda value, d=disease: 1 if d in str(value) else 0)
         df["Patient Age"] = df["Patient Age"].apply(lambda value: clean_age_capped(clean_age(value)))
@@ -444,6 +482,11 @@ class NotebookService:
             "columns": list(df.columns),
             "disease_distribution": df[DISEASE_LABELS].sum().sort_values(ascending=False).to_dict(),
         }
+        if missing_optional:
+            summary["warnings"] = {
+                "missing_optional_columns": missing_optional,
+                "filled_defaults": {"Patient Age": 0, "Patient Gender": "Unknown"},
+            }
         if train_list_file and test_list_file:
             train_ids = {line.strip() for line in Path(train_list_file).read_text(encoding="utf-8").splitlines() if line.strip()}
             test_ids = {line.strip() for line in Path(test_list_file).read_text(encoding="utf-8").splitlines() if line.strip()}

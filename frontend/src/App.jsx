@@ -36,17 +36,23 @@ export default function App() {
 
   usePolling(
     async () => {
-      if (!activeJob?.id) return;
-      const job = await api.getJob(activeJob.id);
-      setActiveJob(job);
-      if (job.status === "completed") {
-        setLatestResult(job.result);
-        setLoading(false);
-        setActiveJob(null);
-        loadDashboard().catch(() => {});
-      }
-      if (job.status === "failed") {
-        setLatestResult({ summary: { error: job.error || "Job failed" } });
+      try {
+        if (!activeJob?.id) return;
+        const job = await api.getJob(activeJob.id);
+        setActiveJob(job);
+        if (job.status === "completed") {
+          setLatestResult(job.result);
+          setLoading(false);
+          setActiveJob(null);
+          loadDashboard().catch(() => {});
+        }
+        if (job.status === "failed") {
+          setLatestResult({ summary: { error: job.error || "Job failed" } });
+          setLoading(false);
+          setActiveJob(null);
+        }
+      } catch (error) {
+        setLatestResult({ summary: { error: error.message || "Failed to fetch job status" } });
         setLoading(false);
         setActiveJob(null);
       }
@@ -67,14 +73,21 @@ export default function App() {
 
   const execute = async (values) => {
     setLoading(true);
-    const response = await api.executeTool(selectedTool.id, values);
-    if (response.job_id) {
-      setActiveJob({ id: response.job_id, status: response.status, progress: 0 });
-      return;
+    try {
+      const response = await api.executeTool(selectedTool.id, values);
+      if (response.job_id) {
+        setActiveJob({ id: response.job_id, status: response.status, progress: 0 });
+        return;
+      }
+      setLatestResult(response.result);
+      await loadDashboard();
+    } catch (error) {
+      // Keep result panel informative even when request fails.
+      setLatestResult({ summary: { error: error.message || "Tool execution failed" } });
+      throw error;
+    } finally {
+      setLoading(false);
     }
-    setLatestResult(response.result);
-    setLoading(false);
-    await loadDashboard();
   };
 
   return (
