@@ -131,6 +131,18 @@ If you want to load pretrained weights manually later, add a `.pth` loader endpo
 - Set environment variables from `.env.example`.
 - Make sure the deployment machine has enough RAM, disk, and GPU support if you plan to run training or local LLM inference.
 
+#### Render (recommended quick setup)
+
+This repo includes `render.yaml` for one-click backend deployment.
+
+1. Push the project to GitHub.
+2. In Render, choose **New +** -> **Blueprint** and select the repo.
+3. Render reads `render.yaml` and creates `minorproject2-backend`.
+4. After deploy, verify:
+   - `https://<your-render-service>.onrender.com/api/health`
+5. Use this backend URL in Netlify:
+   - `VITE_API_BASE_URL=https://<your-render-service>.onrender.com/api`
+
 Example with Waitress:
 
 ```powershell
