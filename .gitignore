@@ -1,0 +1,9 @@
+.venv/
+node_modules/
+frontend/dist/
+backend/storage/uploads/*
+backend/storage/outputs/*
+backend/storage/history.json
+backend/**/__pycache__/
+*.pyc
+.env

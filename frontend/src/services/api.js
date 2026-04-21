@@ -1,0 +1,45 @@
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api";
+
+async function request(path, options = {}) {
+  const response = await fetch(`${API_BASE_URL}${path}`, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || "Request failed");
+  }
+  return data;
+}
+
+export const api = {
+  getTools: () => request("/tools"),
+  getHealth: () => request("/health"),
+  getHistory: () => request("/history"),
+  getArtifacts: () => request("/artifacts"),
+  getJob: (jobId) => request(`/jobs/${jobId}`),
+  executeTool: async (toolId, values) => {
+    const hasFile = Object.values(values).some((value) => value instanceof File);
+    if (hasFile) {
+      const formData = new FormData();
+      Object.entries(values).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== "") {
+          formData.append(key, value);
+        }
+      });
+      const response = await fetch(`${API_BASE_URL}/execute/${toolId}`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Request failed");
+      }
+      return data;
+    }
+    return request(`/execute/${toolId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(values),
+    });
+  },
+  downloadUrl: (path) => `${API_BASE_URL}/download?path=${encodeURIComponent(path)}`,
+};
+
