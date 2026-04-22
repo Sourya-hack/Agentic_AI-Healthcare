@@ -11,6 +11,8 @@ export function ToolsPage({
   selectedTool,
   setSelectedTool,
   onSubmit,
+  rememberedValues,
+  onValuesChange,
   loading,
   latestResult,
   activeJob,
@@ -29,7 +31,14 @@ export function ToolsPage({
           ))}
         </div>
       </div>
-      <ToolForm tool={selectedTool} onSubmit={onSubmit} loading={loading} activeJob={activeJob} />
+      <ToolForm
+        tool={selectedTool}
+        onSubmit={onSubmit}
+        rememberedValues={rememberedValues}
+        onValuesChange={onValuesChange}
+        loading={loading}
+        activeJob={activeJob}
+      />
       <ResultRenderer result={latestResult} />
     </div>
   );

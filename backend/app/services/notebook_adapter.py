@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from PIL import Image
+from sklearn.model_selection import train_test_split
 
 from app.core.config import config
 from app.core.state import AppState
@@ -495,10 +496,23 @@ class NotebookService:
             val_size = int(0.1 * len(train_val_df))
             val_df = train_val_df[:val_size].reset_index(drop=True)
             train_df = train_val_df[val_size:].reset_index(drop=True)
-            self.state.set_runtime("train_df", train_df)
-            self.state.set_runtime("val_df", val_df)
-            self.state.set_runtime("test_df", test_df)
-            summary["splits"] = {"train": len(train_df), "val": len(val_df), "test": len(test_df)}
+            summary["split_source"] = "list_files"
+        else:
+            # Fallback split strategy so workflow remains sequential even without list files.
+            train_val_df, test_df = train_test_split(df, test_size=0.2, random_state=42, shuffle=True)
+            train_df, val_df = train_test_split(train_val_df, test_size=0.1, random_state=42, shuffle=True)
+            train_df = train_df.reset_index(drop=True)
+            val_df = val_df.reset_index(drop=True)
+            test_df = test_df.reset_index(drop=True)
+            summary["split_source"] = "auto_random"
+            summary["warnings"] = {
+                **summary.get("warnings", {}),
+                "auto_split_used": "train_list_file/test_list_file not provided; created random 72/8/20 split.",
+            }
+        self.state.set_runtime("train_df", train_df)
+        self.state.set_runtime("val_df", val_df)
+        self.state.set_runtime("test_df", test_df)
+        summary["splits"] = {"train": len(train_df), "val": len(val_df), "test": len(test_df)}
         return summary
 
     def build_model_summary(self, num_classes: int = NUM_CLASSES) -> dict[str, Any]:

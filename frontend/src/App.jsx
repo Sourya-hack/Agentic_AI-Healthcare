@@ -8,6 +8,8 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { api } from "./services/api";
 import { usePolling } from "./hooks/usePolling";
 
+const TOOL_MEMORY_KEY = "toolFormMemoryV1";
+
 export default function App() {
   const [tools, setTools] = useState([]);
   const [health, setHealth] = useState(null);
@@ -17,6 +19,18 @@ export default function App() {
   const [latestResult, setLatestResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [activeJob, setActiveJob] = useState(null);
+  const [toolFormMemory, setToolFormMemory] = useState(() => {
+    try {
+      const raw = localStorage.getItem(TOOL_MEMORY_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem(TOOL_MEMORY_KEY, JSON.stringify(toolFormMemory));
+  }, [toolFormMemory]);
 
   const loadDashboard = async () => {
     const [toolsResponse, healthResponse, historyResponse] = await Promise.all([
@@ -90,6 +104,15 @@ export default function App() {
     }
   };
 
+  const updateToolFormMemory = (toolId, values) => {
+    if (!toolId) return;
+    // Persist only serializable values. File objects stay in-memory in ToolForm state.
+    const serializable = Object.fromEntries(
+      Object.entries(values || {}).filter(([, value]) => !(value instanceof File)),
+    );
+    setToolFormMemory((current) => ({ ...current, [toolId]: serializable }));
+  };
+
   return (
     <div className="min-h-screen px-4 py-4 lg:px-6">
       <div className="mx-auto grid max-w-[1600px] gap-6 lg:grid-cols-[280px_1fr]">
@@ -108,6 +131,8 @@ export default function App() {
                   selectedTool={selectedTool}
                   setSelectedTool={setSelectedTool}
                   onSubmit={execute}
+                  rememberedValues={toolFormMemory[selectedTool?.id] || {}}
+                  onValuesChange={(values) => updateToolFormMemory(selectedTool?.id, values)}
                   loading={loading}
                   latestResult={latestResult}
                   activeJob={activeJob}
@@ -125,6 +150,8 @@ export default function App() {
                   selectedTool={selectedTool}
                   setSelectedTool={setSelectedTool}
                   onSubmit={execute}
+                  rememberedValues={toolFormMemory[selectedTool?.id] || {}}
+                  onValuesChange={(values) => updateToolFormMemory(selectedTool?.id, values)}
                   loading={loading}
                   latestResult={latestResult}
                   activeJob={activeJob}

@@ -7,7 +7,7 @@ const initialValueForParam = (param) => {
   return "";
 };
 
-export function ToolForm({ tool, onSubmit, loading, activeJob }) {
+export function ToolForm({ tool, onSubmit, rememberedValues, onValuesChange, loading, activeJob }) {
   const [values, setValues] = useState({});
   const [error, setError] = useState("");
 
@@ -15,10 +15,14 @@ export function ToolForm({ tool, onSubmit, loading, activeJob }) {
     if (!tool) return;
     const next = {};
     tool.params.forEach((param) => {
-      next[param.name] = initialValueForParam(param);
+      next[param.name] =
+        rememberedValues?.[param.name] !== undefined ? rememberedValues[param.name] : initialValueForParam(param);
     });
     setValues(next);
     setError("");
+    // Re-initialize only when switching tools. Including rememberedValues here
+    // can clear file inputs because File objects are intentionally not persisted.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool]);
 
   const submitLabel = useMemo(() => (tool?.async ? "Queue Job" : "Run Tool"), [tool]);
@@ -32,12 +36,28 @@ export function ToolForm({ tool, onSubmit, loading, activeJob }) {
   }
 
   const updateValue = (name, value) => {
-    setValues((current) => ({ ...current, [name]: value }));
+    setValues((current) => {
+      const next = { ...current, [name]: value };
+      onValuesChange?.(next);
+      return next;
+    });
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError("");
+    const missing = (tool?.params || [])
+      .filter((param) => param.required)
+      .filter((param) => {
+        const value = values[param.name];
+        if (param.type === "file") return !(value instanceof File);
+        return value === undefined || value === null || value === "";
+      })
+      .map((param) => param.name);
+    if (missing.length) {
+      setError(`Missing required parameter(s): ${missing.join(", ")}`);
+      return;
+    }
     try {
       await onSubmit(values);
     } catch (submissionError) {
@@ -100,6 +120,9 @@ export function ToolForm({ tool, onSubmit, loading, activeJob }) {
                       onChange={(event) => updateValue(param.name, event.target.files?.[0] ?? null)}
                       className="mx-auto block text-sm text-slate-500"
                     />
+                    <p className="mt-2 text-xs text-slate-500">
+                      {values[param.name] instanceof File ? `Selected: ${values[param.name].name}` : "No file selected"}
+                    </p>
                   </div>
                 )}
                 {!["textarea", "json", "dropdown", "file"].includes(param.type) && (
