@@ -131,6 +131,7 @@ If you want to load pretrained weights manually later, add a `.pth` loader endpo
 - Set environment variables from `.env.example`.
 - Make sure the deployment machine has enough RAM, disk, and GPU support if you plan to run training or local LLM inference.
 
+<<<<<<< HEAD
 #### Render (recommended quick setup)
 
 This repo includes `render.yaml` for one-click backend deployment.
@@ -145,6 +146,8 @@ This repo includes `render.yaml` for one-click backend deployment.
 
 The same `render.yaml` also includes an optional static frontend service (`minorproject2-frontend`) as a fallback to Netlify. Set `VITE_API_BASE_URL` in Render frontend service environment variables before deploying it.
 
+=======
+>>>>>>> b7690b0 (url problem fixed)
 Example with Waitress:
 
 ```powershell
@@ -162,6 +165,7 @@ npm run build
 
 Deploy the generated `frontend/dist` folder to any static host and set `VITE_API_BASE_URL` to the deployed backend URL before building.
 
+<<<<<<< HEAD
 #### Frontend environment strategy
 
 - Keep a committed template at `frontend/.env.production.example`.
@@ -170,6 +174,8 @@ Deploy the generated `frontend/dist` folder to any static host and set `VITE_API
   - `VITE_API_BASE_URL=https://<your-backend-domain>/api`
 - For Netlify/Render frontend, set the same variable in the platform environment settings (recommended over committing secrets/config).
 
+=======
+>>>>>>> b7690b0 (url problem fixed)
 ## Important runtime expectations
 
 - `Train Model`, `Inference`, and `Grad-CAM` require the PyTorch stack and valid image/data paths.

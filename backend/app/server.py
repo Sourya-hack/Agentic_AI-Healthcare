@@ -17,6 +17,7 @@ def create_app() -> Flask:
     app.config["SECRET_KEY"] = config.secret_key
     app.config["MAX_CONTENT_LENGTH"] = config.max_content_length
     app.config["APP_CONFIG"] = config
+<<<<<<< HEAD
 
     state = AppState(history=HistoryStore(config.history_path))
     service = NotebookService(state=state)
@@ -26,6 +27,14 @@ def create_app() -> Flask:
     app.config["service"] = service
     app.config["jobs"] = jobs
 
+=======
+    state = AppState(history=HistoryStore(config.history_path))
+    service = NotebookService(state=state)
+    jobs = JobRunner(state=state)
+    app.config["state"] = state
+    app.config["service"] = service
+    app.config["jobs"] = jobs
+>>>>>>> b7690b0 (url problem fixed)
     if config.cors_origins.strip() == "*":
         cors_origins = "*"
     else:
@@ -34,13 +43,21 @@ def create_app() -> Flask:
             re.compile(r"^http://localhost:(5173|5174|4173|3000)$"),
             re.compile(r"^http://127\.0\.0\.1:(5173|5174|4173|3000)$"),
         ]
+<<<<<<< HEAD
 
+=======
+>>>>>>> b7690b0 (url problem fixed)
     CORS(
         app,
         resources={r"/api/*": {"origins": cors_origins}},
         supports_credentials=False,
         send_wildcard=config.cors_origins.strip() == "*",
     )
+<<<<<<< HEAD
 
     app.register_blueprint(api, url_prefix="/api")
     return app
+=======
+    app.register_blueprint(api, url_prefix="/api")
+    return app
+>>>>>>> b7690b0 (url problem fixed)

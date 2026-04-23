@@ -16,4 +16,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     </BrowserRouter>
   </React.StrictMode>,
 );
+<<<<<<< HEAD
 
+=======
+>>>>>>> b7690b0 (url problem fixed)

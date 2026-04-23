@@ -8,8 +8,11 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { api } from "./services/api";
 import { usePolling } from "./hooks/usePolling";
 
+<<<<<<< HEAD
 const TOOL_MEMORY_KEY = "toolFormMemoryV1";
 
+=======
+>>>>>>> b7690b0 (url problem fixed)
 export default function App() {
   const [tools, setTools] = useState([]);
   const [health, setHealth] = useState(null);
@@ -19,6 +22,7 @@ export default function App() {
   const [latestResult, setLatestResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [activeJob, setActiveJob] = useState(null);
+<<<<<<< HEAD
   const [toolFormMemory, setToolFormMemory] = useState(() => {
     try {
       const raw = localStorage.getItem(TOOL_MEMORY_KEY);
@@ -31,6 +35,8 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(TOOL_MEMORY_KEY, JSON.stringify(toolFormMemory));
   }, [toolFormMemory]);
+=======
+>>>>>>> b7690b0 (url problem fixed)
 
   const loadDashboard = async () => {
     const [toolsResponse, healthResponse, historyResponse] = await Promise.all([
@@ -50,6 +56,7 @@ export default function App() {
 
   usePolling(
     async () => {
+<<<<<<< HEAD
       try {
         if (!activeJob?.id) return;
         const job = await api.getJob(activeJob.id);
@@ -67,6 +74,19 @@ export default function App() {
         }
       } catch (error) {
         setLatestResult({ summary: { error: error.message || "Failed to fetch job status" } });
+=======
+      if (!activeJob?.id) return;
+      const job = await api.getJob(activeJob.id);
+      setActiveJob(job);
+      if (job.status === "completed") {
+        setLatestResult(job.result);
+        setLoading(false);
+        setActiveJob(null);
+        loadDashboard().catch(() => {});
+      }
+      if (job.status === "failed") {
+        setLatestResult({ summary: { error: job.error || "Job failed" } });
+>>>>>>> b7690b0 (url problem fixed)
         setLoading(false);
         setActiveJob(null);
       }
@@ -87,6 +107,7 @@ export default function App() {
 
   const execute = async (values) => {
     setLoading(true);
+<<<<<<< HEAD
     try {
       const response = await api.executeTool(selectedTool.id, values);
       if (response.job_id) {
@@ -111,6 +132,16 @@ export default function App() {
       Object.entries(values || {}).filter(([, value]) => !(value instanceof File)),
     );
     setToolFormMemory((current) => ({ ...current, [toolId]: serializable }));
+=======
+    const response = await api.executeTool(selectedTool.id, values);
+    if (response.job_id) {
+      setActiveJob({ id: response.job_id, status: response.status, progress: 0 });
+      return;
+    }
+    setLatestResult(response.result);
+    setLoading(false);
+    await loadDashboard();
+>>>>>>> b7690b0 (url problem fixed)
   };
 
   return (
@@ -131,8 +162,11 @@ export default function App() {
                   selectedTool={selectedTool}
                   setSelectedTool={setSelectedTool}
                   onSubmit={execute}
+<<<<<<< HEAD
                   rememberedValues={toolFormMemory[selectedTool?.id] || {}}
                   onValuesChange={(values) => updateToolFormMemory(selectedTool?.id, values)}
+=======
+>>>>>>> b7690b0 (url problem fixed)
                   loading={loading}
                   latestResult={latestResult}
                   activeJob={activeJob}
@@ -150,8 +184,11 @@ export default function App() {
                   selectedTool={selectedTool}
                   setSelectedTool={setSelectedTool}
                   onSubmit={execute}
+<<<<<<< HEAD
                   rememberedValues={toolFormMemory[selectedTool?.id] || {}}
                   onValuesChange={(values) => updateToolFormMemory(selectedTool?.id, values)}
+=======
+>>>>>>> b7690b0 (url problem fixed)
                   loading={loading}
                   latestResult={latestResult}
                   activeJob={activeJob}

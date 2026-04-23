@@ -10,6 +10,7 @@ import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import unquote, urlparse
 
 import matplotlib
 
@@ -18,7 +19,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from PIL import Image
-from sklearn.model_selection import train_test_split
 
 from app.core.config import config
 from app.core.state import AppState
@@ -128,10 +128,60 @@ def clean_age_capped(age: int) -> int:
     return age
 
 
+def normalize_local_path(path_value: str | Path) -> Path:
+    raw_value = str(path_value).strip().strip('"').strip("'")
+    if not raw_value:
+        raise RuntimeError("Image directory path is empty.")
+    if raw_value.startswith("file://"):
+        parsed = urlparse(raw_value)
+        raw_value = unquote(parsed.path or "")
+        if re.match(r"^/[A-Za-z]:", raw_value):
+            raw_value = raw_value[1:]
+    return Path(raw_value).expanduser()
+
+
+def _directory_has_images(directory: Path) -> bool:
+    if not directory.exists() or not directory.is_dir():
+        return False
+    return any(item.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp"} for item in directory.iterdir() if item.is_file())
+
+
+def resolve_image_dir(image_dir: str | Path, sample_image_id: str | None = None) -> Path:
+    base_dir = normalize_local_path(image_dir)
+    if not base_dir.exists():
+        raise RuntimeError(f"Image directory does not exist: {base_dir}")
+
+    candidate_dirs = [
+        base_dir,
+        base_dir / "images",
+        base_dir / "images-224",
+        base_dir / "images-224" / "images-224",
+        base_dir / "data" / "images",
+    ]
+
+    if sample_image_id:
+        for candidate in candidate_dirs:
+            if candidate.is_dir() and (candidate / sample_image_id).exists():
+                return candidate
+        for match in base_dir.rglob(sample_image_id):
+            if match.is_file():
+                return match.parent
+
+    for candidate in candidate_dirs:
+        if _directory_has_images(candidate):
+            return candidate
+
+    if base_dir.is_dir():
+        return base_dir
+
+    raise RuntimeError(f"Could not resolve a usable image directory from: {base_dir}")
+
+
 class ChestXrayDataset(Dataset):
     def __init__(self, dataframe: pd.DataFrame, image_dir: str | Path, transform: Any = None):
         self.df = dataframe.reset_index(drop=True)
-        self.image_dir = str(image_dir)
+        sample_image_id = self.df.iloc[0]["Image Index"] if not self.df.empty else None
+        self.image_dir = resolve_image_dir(image_dir, sample_image_id=sample_image_id)
         self.transform = transform
 
     def __len__(self) -> int:
@@ -139,7 +189,9 @@ class ChestXrayDataset(Dataset):
 
     def __getitem__(self, idx: int):
         row = self.df.iloc[idx]
-        img_path = os.path.join(self.image_dir, row["Image Index"])
+        img_path = self.image_dir / row["Image Index"]
+        if not img_path.exists():
+            raise FileNotFoundError(f"Could not find image '{row['Image Index']}' inside '{self.image_dir}'.")
         image = Image.open(img_path).convert("RGB")
         if self.transform:
             image = self.transform(image)
@@ -433,44 +485,6 @@ class NotebookService:
 
     def prepare_dataset_metadata(self, csv_file: str, train_list_file: str | None = None, test_list_file: str | None = None) -> dict[str, Any]:
         df = pd.read_csv(csv_file)
-        # Accept common CSV header variants (case/spacing/underscore differences).
-        normalized_to_original = {re.sub(r"[^a-z0-9]+", "", str(col).strip().lower()): col for col in df.columns}
-        required_aliases = {
-            "Finding Labels": ["findinglabels", "findinglabel", "labels", "finding"],
-            "Image Index": ["imageindex", "image", "imageid", "image_name", "imagefilename"],
-        }
-        optional_aliases = {
-            "Patient Age": ["patientage", "age", "patient_age"],
-            "Patient Gender": ["patientgender", "gender", "patient_gender", "sex"],
-        }
-        rename_map: dict[str, str] = {}
-        missing_required: list[str] = []
-        missing_optional: list[str] = []
-        for canonical, aliases in required_aliases.items():
-            existing = next((normalized_to_original[a] for a in aliases if a in normalized_to_original), None)
-            if existing is None:
-                missing_required.append(canonical)
-            elif existing != canonical:
-                rename_map[existing] = canonical
-        for canonical, aliases in optional_aliases.items():
-            existing = next((normalized_to_original[a] for a in aliases if a in normalized_to_original), None)
-            if existing is None:
-                missing_optional.append(canonical)
-            elif existing != canonical:
-                rename_map[existing] = canonical
-        if rename_map:
-            df = df.rename(columns=rename_map)
-        if missing_required:
-            raise RuntimeError(
-                "CSV is missing required columns: "
-                + ", ".join(missing_required)
-                + ". Available columns: "
-                + ", ".join(map(str, df.columns))
-            )
-        if "Patient Age" not in df.columns:
-            df["Patient Age"] = 0
-        if "Patient Gender" not in df.columns:
-            df["Patient Gender"] = "Unknown"
         for disease in DISEASE_LABELS:
             df[disease] = df["Finding Labels"].apply(lambda value, d=disease: 1 if d in str(value) else 0)
         df["Patient Age"] = df["Patient Age"].apply(lambda value: clean_age_capped(clean_age(value)))
@@ -483,11 +497,6 @@ class NotebookService:
             "columns": list(df.columns),
             "disease_distribution": df[DISEASE_LABELS].sum().sort_values(ascending=False).to_dict(),
         }
-        if missing_optional:
-            summary["warnings"] = {
-                "missing_optional_columns": missing_optional,
-                "filled_defaults": {"Patient Age": 0, "Patient Gender": "Unknown"},
-            }
         if train_list_file and test_list_file:
             train_ids = {line.strip() for line in Path(train_list_file).read_text(encoding="utf-8").splitlines() if line.strip()}
             test_ids = {line.strip() for line in Path(test_list_file).read_text(encoding="utf-8").splitlines() if line.strip()}
@@ -496,23 +505,10 @@ class NotebookService:
             val_size = int(0.1 * len(train_val_df))
             val_df = train_val_df[:val_size].reset_index(drop=True)
             train_df = train_val_df[val_size:].reset_index(drop=True)
-            summary["split_source"] = "list_files"
-        else:
-            # Fallback split strategy so workflow remains sequential even without list files.
-            train_val_df, test_df = train_test_split(df, test_size=0.2, random_state=42, shuffle=True)
-            train_df, val_df = train_test_split(train_val_df, test_size=0.1, random_state=42, shuffle=True)
-            train_df = train_df.reset_index(drop=True)
-            val_df = val_df.reset_index(drop=True)
-            test_df = test_df.reset_index(drop=True)
-            summary["split_source"] = "auto_random"
-            summary["warnings"] = {
-                **summary.get("warnings", {}),
-                "auto_split_used": "train_list_file/test_list_file not provided; created random 72/8/20 split.",
-            }
-        self.state.set_runtime("train_df", train_df)
-        self.state.set_runtime("val_df", val_df)
-        self.state.set_runtime("test_df", test_df)
-        summary["splits"] = {"train": len(train_df), "val": len(val_df), "test": len(test_df)}
+            self.state.set_runtime("train_df", train_df)
+            self.state.set_runtime("val_df", val_df)
+            self.state.set_runtime("test_df", test_df)
+            summary["splits"] = {"train": len(train_df), "val": len(val_df), "test": len(test_df)}
         return summary
 
     def build_model_summary(self, num_classes: int = NUM_CLASSES) -> dict[str, Any]:
@@ -533,6 +529,7 @@ class NotebookService:
         val_df = self.state.get_runtime("val_df")
         if train_df is None or val_df is None:
             raise RuntimeError("Dataset splits are not loaded. Run prepare_dataset_metadata first.")
+        resolved_image_dir = resolve_image_dir(image_dir, sample_image_id=train_df.iloc[0]["Image Index"] if not train_df.empty else None)
         train_transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.RandomHorizontalFlip(),
@@ -547,8 +544,8 @@ class NotebookService:
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
-        train_loader = DataLoader(ChestXrayDataset(train_df, image_dir, train_transform), batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=False)
-        val_loader = DataLoader(ChestXrayDataset(val_df, image_dir, val_test_transform), batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=False)
+        train_loader = DataLoader(ChestXrayDataset(train_df, resolved_image_dir, train_transform), batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=False)
+        val_loader = DataLoader(ChestXrayDataset(val_df, resolved_image_dir, val_test_transform), batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=False)
         model = self.state.get_runtime("model") or build_densenet121(num_classes=NUM_CLASSES)
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model = model.to(device)
@@ -567,6 +564,7 @@ class NotebookService:
         chart_path = self._save_plot(figure, "training_curves.png")
         return {
             "history": history,
+            "resolved_image_dir": str(resolved_image_dir),
             "artifacts": [
                 artifact_payload(history_path, "Training History", "json"),
                 artifact_payload(chart_path, "Training Curves", "image"),
@@ -580,12 +578,13 @@ class NotebookService:
         model = self.state.get_runtime("model")
         if model is None or test_df is None:
             raise RuntimeError("Model and test split are required before inference.")
+        resolved_image_dir = resolve_image_dir(image_dir, sample_image_id=test_df.iloc[0]["Image Index"] if not test_df.empty else None)
         transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
-        loader = DataLoader(ChestXrayDataset(test_df, image_dir, transform), batch_size=16, shuffle=False, num_workers=0)
+        loader = DataLoader(ChestXrayDataset(test_df, resolved_image_dir, transform), batch_size=16, shuffle=False, num_workers=0)
         model.eval()
         all_results: list[dict[str, Any]] = []
         misclassified: list[dict[str, Any]] = []
@@ -638,7 +637,7 @@ class NotebookService:
             ]
         )
         csv_path = self._save_csv(misc_df, "misclassified_records.csv")
-        return {"summary": summary, "preview": misc_df.head(25), "artifacts": [artifact_payload(csv_path, "Misclassified Records", "csv")]}
+        return {"summary": summary, "resolved_image_dir": str(resolved_image_dir), "preview": misc_df.head(25), "artifacts": [artifact_payload(csv_path, "Misclassified Records", "csv")]}
 
     def generate_structured_error_data(self) -> dict[str, Any]:
         misclassified = self.state.get_runtime("misclassified", [])
@@ -917,6 +916,7 @@ class NotebookService:
         model = self.state.get_runtime("model")
         if llm_df is None or llm_df.empty or model is None:
             raise RuntimeError("Run model training/inference and LLM reasoning before Grad-CAM.")
+        resolved_image_dir = resolve_image_dir(image_dir, sample_image_id=str(llm_df.iloc[0]["image_id"]) if not llm_df.empty else None)
         transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
@@ -938,7 +938,7 @@ class NotebookService:
             pred_list = [item.strip() for item in str(sample["pred_labels"]).split(",") if item.strip() in DISEASE_LABELS]
             true_idx = DISEASE_LABELS.index(true_list[0]) if true_list else 0
             pred_idx = DISEASE_LABELS.index(pred_list[0]) if pred_list else 0
-            raw_img = Image.open(Path(image_dir) / image_id).convert("RGB").resize((224, 224))
+            raw_img = Image.open(resolved_image_dir / image_id).convert("RGB").resize((224, 224))
             rgb_array = np.array(raw_img).astype(np.float32) / 255.0
             image_tensor = transform(raw_img)
             try:
@@ -955,18 +955,19 @@ class NotebookService:
             for row in range(3):
                 axes[row][col].axis("off")
         chart_path = self._save_plot(fig, "gradcam_visualizations.png")
-        return {"artifacts": [artifact_payload(chart_path, "Grad-CAM Visualizations", "image")]}
+        return {"resolved_image_dir": str(resolved_image_dir), "artifacts": [artifact_payload(chart_path, "Grad-CAM Visualizations", "image")]}
 
     def sample_image_preview(self, image_dir: str, sample_count: int = 10) -> dict[str, Any]:
         train_df = self.state.get_runtime("train_df")
         if train_df is None:
             raise RuntimeError("Dataset splits are not loaded. Run prepare_dataset_metadata first.")
+        resolved_image_dir = resolve_image_dir(image_dir, sample_image_id=train_df.iloc[0]["Image Index"] if not train_df.empty else None)
         fig, axes = plt.subplots(2, max(1, sample_count // 2), figsize=(20, 8))
         axes = np.array(axes).reshape(-1)
         preview_rows = []
         for idx, axis in enumerate(axes[:sample_count]):
             row = train_df.iloc[idx]
-            img_path = Path(image_dir) / row["Image Index"]
+            img_path = resolved_image_dir / row["Image Index"]
             image = Image.open(img_path).convert("RGB")
             diseases = [disease for disease in DISEASE_LABELS if row[disease] == 1]
             label = ", ".join(diseases) if diseases else "No Finding"
@@ -975,11 +976,10 @@ class NotebookService:
             axis.axis("off")
             preview_rows.append({"image_id": row["Image Index"], "label": label, "gender": row["Patient Gender"], "age": int(row["Patient Age"])})
         chart_path = self._save_plot(fig, "sample_images.png")
-        return {"preview": preview_rows, "artifacts": [artifact_payload(chart_path, "Sample Images", "image")]}
+        return {"preview": preview_rows, "resolved_image_dir": str(resolved_image_dir), "artifacts": [artifact_payload(chart_path, "Sample Images", "image")]}
 
     def encode_image_base64(self, image_path: str) -> dict[str, Any]:
         path = Path(image_path)
         data = base64.b64encode(path.read_bytes()).decode("utf-8")
         mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
         return {"name": path.name, "mime_type": mime, "base64": data}
-
