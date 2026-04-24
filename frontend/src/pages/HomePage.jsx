@@ -54,6 +54,21 @@ export function HomePage({ health, tools }) {
           </dl>
         </div>
       </section>
+
+      <section className="rounded-[1.75rem] bg-white/90 p-6 shadow-panel">
+        <h2 className="font-display text-2xl font-semibold text-ink">Recommended Tool Order</h2>
+        <ol className="mt-4 list-decimal space-y-2 pl-5 text-sm text-slate-700">
+          <li>Validate Dataset Match (check CSV and image folder overlap first).</li>
+          <li>Prepare Dataset Metadata (upload CSV, optional train/test lists).</li>
+          <li>Sample Image Preview (verify image directory and labels).</li>
+          <li>Build DenseNet121.</li>
+          <li>Train Model.</li>
+          <li>Inference And Misclassifications.</li>
+          <li>Structured Error Data.</li>
+          <li>LLM Error Reasoning.</li>
+          <li>Error Taxonomy, Bias Detection, Label Inconsistency, and Grad-CAM.</li>
+        </ol>
+      </section>
     </div>
   );
 }

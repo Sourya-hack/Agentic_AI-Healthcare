@@ -27,6 +27,19 @@ FUNCTION_REGISTRY: list[dict[str, Any]] = [
         "returns": ["text", "table"],
     },
     {
+        "id": "validate_dataset_match",
+        "name": "Validate Dataset Match",
+        "section": "main",
+        "description": "Compare CSV image ids with files in the image folder and report overlap, missing ids, and extras before training.",
+        "handler": "validate_dataset_match",
+        "params": [
+            {"name": "csv_file", "type": "file", "required": True, "accept": ".csv"},
+            {"name": "image_dir", "type": "directory", "required": True},
+            {"name": "sample_limit", "type": "number", "required": False, "default": 20},
+        ],
+        "returns": ["table", "text"],
+    },
+    {
         "id": "sample_image_preview",
         "name": "Sample Image Preview",
         "section": "main",

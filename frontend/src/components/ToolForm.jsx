@@ -7,11 +7,7 @@ const initialValueForParam = (param) => {
   return "";
 };
 
-<<<<<<< HEAD
 export function ToolForm({ tool, onSubmit, rememberedValues, onValuesChange, loading, activeJob }) {
-=======
-export function ToolForm({ tool, onSubmit, loading, activeJob }) {
->>>>>>> b7690b0 (url problem fixed)
   const [values, setValues] = useState({});
   const [error, setError] = useState("");
 
@@ -19,7 +15,6 @@ export function ToolForm({ tool, onSubmit, loading, activeJob }) {
     if (!tool) return;
     const next = {};
     tool.params.forEach((param) => {
-<<<<<<< HEAD
       next[param.name] =
         rememberedValues?.[param.name] !== undefined ? rememberedValues[param.name] : initialValueForParam(param);
     });
@@ -28,12 +23,6 @@ export function ToolForm({ tool, onSubmit, loading, activeJob }) {
     // Re-initialize only when switching tools. Including rememberedValues here
     // can clear file inputs because File objects are intentionally not persisted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-=======
-      next[param.name] = initialValueForParam(param);
-    });
-    setValues(next);
-    setError("");
->>>>>>> b7690b0 (url problem fixed)
   }, [tool]);
 
   const submitLabel = useMemo(() => (tool?.async ? "Queue Job" : "Run Tool"), [tool]);
@@ -47,21 +36,16 @@ export function ToolForm({ tool, onSubmit, loading, activeJob }) {
   }
 
   const updateValue = (name, value) => {
-<<<<<<< HEAD
     setValues((current) => {
       const next = { ...current, [name]: value };
       onValuesChange?.(next);
       return next;
     });
-=======
-    setValues((current) => ({ ...current, [name]: value }));
->>>>>>> b7690b0 (url problem fixed)
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError("");
-<<<<<<< HEAD
     const missing = (tool?.params || [])
       .filter((param) => param.required)
       .filter((param) => {
@@ -74,8 +58,6 @@ export function ToolForm({ tool, onSubmit, loading, activeJob }) {
       setError(`Missing required parameter(s): ${missing.join(", ")}`);
       return;
     }
-=======
->>>>>>> b7690b0 (url problem fixed)
     try {
       await onSubmit(values);
     } catch (submissionError) {
@@ -138,12 +120,9 @@ export function ToolForm({ tool, onSubmit, loading, activeJob }) {
                       onChange={(event) => updateValue(param.name, event.target.files?.[0] ?? null)}
                       className="mx-auto block text-sm text-slate-500"
                     />
-<<<<<<< HEAD
                     <p className="mt-2 text-xs text-slate-500">
                       {values[param.name] instanceof File ? `Selected: ${values[param.name].name}` : "No file selected"}
                     </p>
-=======
->>>>>>> b7690b0 (url problem fixed)
                   </div>
                 )}
                 {!["textarea", "json", "dropdown", "file"].includes(param.type) && (

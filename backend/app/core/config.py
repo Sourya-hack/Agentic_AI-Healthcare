@@ -3,19 +3,11 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-<<<<<<< HEAD
-=======
-
->>>>>>> b7690b0 (url problem fixed)
 from dotenv import load_dotenv
 
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-<<<<<<< HEAD
-=======
-
->>>>>>> b7690b0 (url problem fixed)
 @dataclass(slots=True)
 class AppConfig:
     base_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parents[2])
@@ -43,7 +35,3 @@ class AppConfig:
 
 
 config = AppConfig()
-<<<<<<< HEAD
-
-=======
->>>>>>> b7690b0 (url problem fixed)

@@ -1,7 +1,15 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5001/api";
+
+async function fetchWithNetworkError(url, options = {}) {
+  try {
+    return await fetch(url, options);
+  } catch {
+    throw new Error(`Cannot reach backend at ${API_BASE_URL}. Start backend and retry.`);
+  }
+}
 
 async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE_URL}${path}`, options);
+  const response = await fetchWithNetworkError(`${API_BASE_URL}${path}`, options);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data.error || "Request failed");
@@ -24,7 +32,7 @@ export const api = {
           formData.append(key, value);
         }
       });
-      const response = await fetch(`${API_BASE_URL}/execute/${toolId}`, {
+      const response = await fetchWithNetworkError(`${API_BASE_URL}/execute/${toolId}`, {
         method: "POST",
         body: formData,
       });

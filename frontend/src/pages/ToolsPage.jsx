@@ -11,11 +11,8 @@ export function ToolsPage({
   selectedTool,
   setSelectedTool,
   onSubmit,
-<<<<<<< HEAD
   rememberedValues,
   onValuesChange,
-=======
->>>>>>> b7690b0 (url problem fixed)
   loading,
   latestResult,
   activeJob,
@@ -34,7 +31,6 @@ export function ToolsPage({
           ))}
         </div>
       </div>
-<<<<<<< HEAD
       <ToolForm
         tool={selectedTool}
         onSubmit={onSubmit}
@@ -43,9 +39,6 @@ export function ToolsPage({
         loading={loading}
         activeJob={activeJob}
       />
-=======
-      <ToolForm tool={selectedTool} onSubmit={onSubmit} loading={loading} activeJob={activeJob} />
->>>>>>> b7690b0 (url problem fixed)
       <ResultRenderer result={latestResult} />
     </div>
   );

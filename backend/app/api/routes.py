@@ -38,18 +38,12 @@ def _save_uploads() -> dict[str, str]:
 
 def _coerce_args(tool_meta: dict[str, Any], form_payload: dict[str, Any]) -> dict[str, Any]:
     coerced: dict[str, Any] = {}
-<<<<<<< HEAD
     missing_required: list[str] = []
     for param in tool_meta.get("params", []):
         name = param["name"]
         if name not in form_payload or form_payload[name] in ("", None):
             if param.get("required"):
                 missing_required.append(name)
-=======
-    for param in tool_meta.get("params", []):
-        name = param["name"]
-        if name not in form_payload or form_payload[name] in ("", None):
->>>>>>> b7690b0 (url problem fixed)
             if "default" in param:
                 coerced[name] = param["default"]
             continue
@@ -63,11 +57,8 @@ def _coerce_args(tool_meta: dict[str, Any], form_payload: dict[str, Any]) -> dic
             coerced[name] = value if isinstance(value, dict) else json.loads(value)
         else:
             coerced[name] = value
-<<<<<<< HEAD
     if missing_required:
         raise ValueError(f"Missing required parameter(s): {', '.join(missing_required)}")
-=======
->>>>>>> b7690b0 (url problem fixed)
     return coerced
 
 
@@ -127,14 +118,10 @@ def execute(tool_id: str):
     merged_payload = {**payload, **uploads}
     if request.form:
         merged_payload.update(request.form.to_dict())
-<<<<<<< HEAD
     try:
         args = _coerce_args(tool_meta, merged_payload)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-=======
-    args = _coerce_args(tool_meta, merged_payload)
->>>>>>> b7690b0 (url problem fixed)
     handler = getattr(_service(), tool_meta["handler"], None)
     if handler is None:
         # Utility functions live at module level on service object fallback.

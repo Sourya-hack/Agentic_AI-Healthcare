@@ -128,6 +128,10 @@ def clean_age_capped(age: int) -> int:
     return age
 
 
+def normalize_image_key(value: str | Path) -> str:
+    return Path(str(value).strip().replace("\\", "/")).name.lower()
+
+
 def normalize_local_path(path_value: str | Path) -> Path:
     raw_value = str(path_value).strip().strip('"').strip("'")
     if not raw_value:
@@ -150,6 +154,11 @@ def resolve_image_dir(image_dir: str | Path, sample_image_id: str | None = None)
     base_dir = normalize_local_path(image_dir)
     if not base_dir.exists():
         raise RuntimeError(f"Image directory does not exist: {base_dir}")
+    if base_dir.is_file():
+        # Users often paste a single image path; use its parent folder.
+        if base_dir.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp"}:
+            return base_dir.parent
+        raise RuntimeError(f"Expected an image folder or image file path, got file: {base_dir}")
 
     candidate_dirs = [
         base_dir,
@@ -183,13 +192,28 @@ class ChestXrayDataset(Dataset):
         sample_image_id = self.df.iloc[0]["Image Index"] if not self.df.empty else None
         self.image_dir = resolve_image_dir(image_dir, sample_image_id=sample_image_id)
         self.transform = transform
+        self._image_lookup: dict[str, Path] = {}
+
+        for item in self.image_dir.rglob("*"):
+            if item.is_file() and item.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp"}:
+                self._image_lookup.setdefault(item.name, item)
+
+        if not self._image_lookup:
+            raise RuntimeError(f"No image files found under: {self.image_dir}")
+
+        self.df = self.df[self.df["Image Index"].isin(self._image_lookup.keys())].reset_index(drop=True)
+        if self.df.empty:
+            raise RuntimeError(
+                "None of the dataset image ids were found in the provided image directory. "
+                f"Resolved image root: {self.image_dir}"
+            )
 
     def __len__(self) -> int:
         return len(self.df)
 
     def __getitem__(self, idx: int):
         row = self.df.iloc[idx]
-        img_path = self.image_dir / row["Image Index"]
+        img_path = self._image_lookup.get(str(row["Image Index"]), self.image_dir / str(row["Image Index"]))
         if not img_path.exists():
             raise FileNotFoundError(f"Could not find image '{row['Image Index']}' inside '{self.image_dir}'.")
         image = Image.open(img_path).convert("RGB")
@@ -445,6 +469,17 @@ def apply_gradcam(model, image_tensor, class_idx: int):
 class NotebookService:
     state: AppState
 
+    def _runtime_cache_dir(self) -> Path:
+        path = config.storage_dir / "runtime_cache"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _cache_table_path(self, name: str) -> Path:
+        return self._runtime_cache_dir() / f"{name}.csv"
+
+    def _cache_json_path(self, name: str) -> Path:
+        return self._runtime_cache_dir() / f"{name}.json"
+
     def _save_plot(self, figure: plt.Figure, filename: str) -> Path:
         path = config.outputs_dir / filename
         figure.savefig(path, dpi=140, bbox_inches="tight")
@@ -460,6 +495,36 @@ class NotebookService:
         path = config.outputs_dir / filename
         dataframe.to_csv(path, index=False)
         return path
+
+    def _persist_runtime_table(self, key: str, dataframe: pd.DataFrame) -> None:
+        self.state.set_runtime(key, dataframe)
+        dataframe.to_csv(self._cache_table_path(key), index=False)
+
+    def _load_runtime_table(self, key: str) -> pd.DataFrame | None:
+        cached = self.state.get_runtime(key)
+        if cached is not None:
+            return cached
+        path = self._cache_table_path(key)
+        if not path.exists():
+            return None
+        loaded = pd.read_csv(path)
+        self.state.set_runtime(key, loaded)
+        return loaded
+
+    def _persist_runtime_json(self, key: str, payload: Any) -> None:
+        self.state.set_runtime(key, payload)
+        self._cache_json_path(key).write_text(json.dumps(make_json_safe(payload), indent=2), encoding="utf-8")
+
+    def _load_runtime_json(self, key: str, default: Any = None) -> Any:
+        cached = self.state.get_runtime(key)
+        if cached is not None:
+            return cached
+        path = self._cache_json_path(key)
+        if not path.exists():
+            return default
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        self.state.set_runtime(key, loaded)
+        return loaded
 
     def health(self) -> dict[str, Any]:
         return {
@@ -485,13 +550,42 @@ class NotebookService:
 
     def prepare_dataset_metadata(self, csv_file: str, train_list_file: str | None = None, test_list_file: str | None = None) -> dict[str, Any]:
         df = pd.read_csv(csv_file)
+        expected_columns = {
+            "Image Index": ["Image Index", "ImageIndex", "image_index", "Image", "image"],
+            "Finding Labels": ["Finding Labels", "Finding Label", "finding_labels", "labels", "Labels"],
+            "Patient Age": ["Patient Age", "PatientAge", "patient_age", "Age", "age"],
+            "Patient Gender": ["Patient Gender", "PatientGender", "patient_gender", "Gender", "gender", "Sex", "sex"],
+        }
+        required_columns = {"Image Index", "Finding Labels"}
+        rename_map: dict[str, str] = {}
+        for target_column, aliases in expected_columns.items():
+            if target_column in df.columns:
+                continue
+            matched_column = next((column for column in aliases if column in df.columns), None)
+            if matched_column:
+                rename_map[matched_column] = target_column
+        if rename_map:
+            df = df.rename(columns=rename_map)
+        missing_columns = [column for column in required_columns if column not in df.columns]
+        if missing_columns:
+            raise ValueError(
+                "Missing required CSV column(s): "
+                + ", ".join(missing_columns)
+                + f". Available columns: {', '.join(map(str, df.columns.tolist()))}"
+            )
+        if "Patient Age" not in df.columns:
+            # Some NIH label files only include image id and findings.
+            df["Patient Age"] = 0
+        if "Patient Gender" not in df.columns:
+            # Keep downstream processing stable when demographics are missing.
+            df["Patient Gender"] = "Unknown"
         for disease in DISEASE_LABELS:
             df[disease] = df["Finding Labels"].apply(lambda value, d=disease: 1 if d in str(value) else 0)
         df["Patient Age"] = df["Patient Age"].apply(lambda value: clean_age_capped(clean_age(value)))
         df["Patient Gender"] = df["Patient Gender"].fillna("Unknown")
         age_lookup = dict(zip(df["Image Index"], df["Patient Age"]))
-        self.state.set_runtime("dataset_df", df)
-        self.state.set_runtime("age_lookup", age_lookup)
+        self._persist_runtime_table("dataset_df", df)
+        self._persist_runtime_json("age_lookup", age_lookup)
         summary = {
             "rows": int(df.shape[0]),
             "columns": list(df.columns),
@@ -505,11 +599,124 @@ class NotebookService:
             val_size = int(0.1 * len(train_val_df))
             val_df = train_val_df[:val_size].reset_index(drop=True)
             train_df = train_val_df[val_size:].reset_index(drop=True)
-            self.state.set_runtime("train_df", train_df)
-            self.state.set_runtime("val_df", val_df)
-            self.state.set_runtime("test_df", test_df)
+            self._persist_runtime_table("train_df", train_df)
+            self._persist_runtime_table("val_df", val_df)
+            self._persist_runtime_table("test_df", test_df)
             summary["splits"] = {"train": len(train_df), "val": len(val_df), "test": len(test_df)}
+        else:
+            shuffled = df.sample(frac=1.0, random_state=42).reset_index(drop=True)
+            total = len(shuffled)
+            train_end = int(total * 0.8)
+            val_end = train_end + int(total * 0.1)
+            train_df = shuffled.iloc[:train_end].reset_index(drop=True)
+            val_df = shuffled.iloc[train_end:val_end].reset_index(drop=True)
+            test_df = shuffled.iloc[val_end:].reset_index(drop=True)
+            self._persist_runtime_table("train_df", train_df)
+            self._persist_runtime_table("val_df", val_df)
+            self._persist_runtime_table("test_df", test_df)
+            summary["splits"] = {"train": len(train_df), "val": len(val_df), "test": len(test_df), "strategy": "auto_random_80_10_10"}
         return summary
+
+    def validate_dataset_match(self, csv_file: str, image_dir: str, sample_limit: int = 20) -> dict[str, Any]:
+        df = pd.read_csv(csv_file)
+        if "Image Index" not in df.columns and "Finding Label" in df.columns:
+            # Keep compatibility with NIH bbox csv naming.
+            df = df.rename(columns={"Finding Label": "Finding Labels"})
+        if "Image Index" not in df.columns:
+            raise ValueError(
+                "CSV must include 'Image Index'. "
+                f"Available columns: {', '.join(map(str, df.columns.tolist()))}"
+            )
+        resolved_image_dir = resolve_image_dir(image_dir)
+        image_files = [
+            item
+            for item in resolved_image_dir.rglob("*")
+            if item.is_file() and item.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp"}
+        ]
+        available_names = {item.name for item in image_files}
+        available_keys = {normalize_image_key(item.name): item.name for item in image_files}
+
+        csv_series = df["Image Index"].astype(str)
+        csv_keys = csv_series.apply(normalize_image_key)
+        matched_mask = csv_keys.isin(available_keys.keys())
+        matched_df = df[matched_mask].copy()
+        unmatched_df = df[~matched_mask].copy()
+
+        sample_limit = max(int(sample_limit), 1)
+        matched_rows = (
+            matched_df[["Image Index"]]
+            .head(sample_limit)
+            .assign(status="matched")
+            .to_dict(orient="records")
+        )
+        missing_rows = (
+            unmatched_df[["Image Index"]]
+            .head(sample_limit)
+            .assign(status="missing")
+            .to_dict(orient="records")
+        )
+        extra_image_names = sorted(available_names - set(csv_series))
+        extra_rows = [{"Image Index": name, "status": "extra_in_folder"} for name in extra_image_names[:sample_limit]]
+
+        summary = {
+            "csv_rows": int(len(df)),
+            "folder_images": int(len(image_files)),
+            "overlap_count": int(matched_mask.sum()),
+            "missing_from_folder_count": int((~matched_mask).sum()),
+            "extra_in_folder_count": int(len(extra_image_names)),
+            "resolved_image_root": str(resolved_image_dir),
+            "compatible": bool(matched_mask.any()),
+        }
+        return {
+            "summary": summary,
+            "preview": {
+                "type": "table",
+                "columns": ["Image Index", "status"],
+                "rows": matched_rows + missing_rows + extra_rows,
+            },
+        }
+
+    def _ensure_splits_for_image_dir(self, image_dir: str | Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Path]:
+        dataset_df = self._load_runtime_table("dataset_df")
+        if dataset_df is None:
+            raise RuntimeError("Dataset metadata is not loaded. Run prepare_dataset_metadata first.")
+        resolved_image_dir = resolve_image_dir(image_dir)
+        available_images = {
+            item.name
+            for item in resolved_image_dir.rglob("*")
+            if item.is_file() and item.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp"}
+        }
+        matched_df = dataset_df[dataset_df["Image Index"].isin(available_images)].reset_index(drop=True)
+        if matched_df.empty:
+            raise RuntimeError(
+                "No metadata rows match files in the provided image directory. "
+                f"Resolved image root: {resolved_image_dir}. "
+                "Use the folder that contains your dataset images, not a different sample set."
+            )
+
+        train_df = self._load_runtime_table("train_df")
+        val_df = self._load_runtime_table("val_df")
+        test_df = self._load_runtime_table("test_df")
+        split_keys_missing = train_df is None or val_df is None or test_df is None
+        split_rows_missing = (
+            not split_keys_missing
+            and (len(train_df) == 0 or len(val_df) == 0 or len(test_df) == 0)
+        )
+
+        if split_keys_missing or split_rows_missing:
+            shuffled = matched_df.sample(frac=1.0, random_state=42).reset_index(drop=True)
+            total = len(shuffled)
+            train_end = max(int(total * 0.8), 1)
+            val_end = min(train_end + max(int(total * 0.1), 1), total)
+            train_df = shuffled.iloc[:train_end].reset_index(drop=True)
+            val_df = shuffled.iloc[train_end:val_end].reset_index(drop=True)
+            test_df = shuffled.iloc[val_end:].reset_index(drop=True)
+            if test_df.empty:
+                test_df = val_df.copy()
+            self._persist_runtime_table("train_df", train_df)
+            self._persist_runtime_table("val_df", val_df)
+            self._persist_runtime_table("test_df", test_df)
+        return train_df, val_df, test_df, resolved_image_dir
 
     def build_model_summary(self, num_classes: int = NUM_CLASSES) -> dict[str, Any]:
         model = build_densenet121(num_classes=num_classes)
@@ -525,11 +732,7 @@ class NotebookService:
 
     def train_model_workflow(self, image_dir: str, epochs: int = 5, lr: float = 1e-4, batch_size: int = 32, progress_callback: Callable[[int, str | None], None] | None = None) -> dict[str, Any]:
         _require_torch()
-        train_df = self.state.get_runtime("train_df")
-        val_df = self.state.get_runtime("val_df")
-        if train_df is None or val_df is None:
-            raise RuntimeError("Dataset splits are not loaded. Run prepare_dataset_metadata first.")
-        resolved_image_dir = resolve_image_dir(image_dir, sample_image_id=train_df.iloc[0]["Image Index"] if not train_df.empty else None)
+        train_df, val_df, _, resolved_image_dir = self._ensure_splits_for_image_dir(image_dir)
         train_transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.RandomHorizontalFlip(),
@@ -573,12 +776,11 @@ class NotebookService:
 
     def run_inference_analysis(self, image_dir: str, threshold: float = 0.5) -> dict[str, Any]:
         _require_torch()
-        test_df = self.state.get_runtime("test_df")
-        age_lookup = self.state.get_runtime("age_lookup", {})
+        _, _, test_df, resolved_image_dir = self._ensure_splits_for_image_dir(image_dir)
+        age_lookup = self._load_runtime_json("age_lookup", {})
         model = self.state.get_runtime("model")
         if model is None or test_df is None:
             raise RuntimeError("Model and test split are required before inference.")
-        resolved_image_dir = resolve_image_dir(image_dir, sample_image_id=test_df.iloc[0]["Image Index"] if not test_df.empty else None)
         transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
@@ -958,10 +1160,7 @@ class NotebookService:
         return {"resolved_image_dir": str(resolved_image_dir), "artifacts": [artifact_payload(chart_path, "Grad-CAM Visualizations", "image")]}
 
     def sample_image_preview(self, image_dir: str, sample_count: int = 10) -> dict[str, Any]:
-        train_df = self.state.get_runtime("train_df")
-        if train_df is None:
-            raise RuntimeError("Dataset splits are not loaded. Run prepare_dataset_metadata first.")
-        resolved_image_dir = resolve_image_dir(image_dir, sample_image_id=train_df.iloc[0]["Image Index"] if not train_df.empty else None)
+        train_df, _, _, resolved_image_dir = self._ensure_splits_for_image_dir(image_dir)
         fig, axes = plt.subplots(2, max(1, sample_count // 2), figsize=(20, 8))
         axes = np.array(axes).reshape(-1)
         preview_rows = []
