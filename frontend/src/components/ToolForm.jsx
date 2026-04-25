@@ -50,7 +50,7 @@ export function ToolForm({ tool, onSubmit, rememberedValues, onValuesChange, loa
       .filter((param) => param.required)
       .filter((param) => {
         const value = values[param.name];
-        if (param.type === "file") return !(value instanceof File);
+        if (param.type === "file") return !(value instanceof File) && typeof value !== "string";
         return value === undefined || value === null || value === "";
       })
       .map((param) => param.name);
@@ -121,8 +121,19 @@ export function ToolForm({ tool, onSubmit, rememberedValues, onValuesChange, loa
                       className="mx-auto block text-sm text-slate-500"
                     />
                     <p className="mt-2 text-xs text-slate-500">
-                      {values[param.name] instanceof File ? `Selected: ${values[param.name].name}` : "No file selected"}
+                      {values[param.name] instanceof File
+                        ? `Selected: ${values[param.name].name}`
+                        : typeof values[param.name] === "string" && values[param.name].trim()
+                          ? `Using path: ${values[param.name]}`
+                          : "No file selected"}
                     </p>
+                    <input
+                      type="text"
+                      placeholder="Or enter an absolute file path available to backend"
+                      className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-accent"
+                      value={typeof values[param.name] === "string" ? values[param.name] : ""}
+                      onChange={(event) => updateValue(param.name, event.target.value)}
+                    />
                   </div>
                 )}
                 {!["textarea", "json", "dropdown", "file"].includes(param.type) && (

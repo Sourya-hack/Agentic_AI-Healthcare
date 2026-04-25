@@ -25,6 +25,13 @@ def _state():
     return current_app.config["state"]
 
 
+def _latest_payload_for_tool(tool_id: str) -> dict[str, Any]:
+    for entry in _state().history.list_entries():
+        if entry.get("tool_id") == tool_id and isinstance(entry.get("payload"), dict):
+            return dict(entry["payload"])
+    return {}
+
+
 def _save_uploads() -> dict[str, str]:
     saved: dict[str, str] = {}
     upload_dir = Path(current_app.config["APP_CONFIG"].uploads_dir)
@@ -115,9 +122,18 @@ def execute(tool_id: str):
         return jsonify({"error": "Tool not found"}), 404
     payload = request.get_json(silent=True) or {}
     uploads = _save_uploads() if request.files else {}
-    merged_payload = {**payload, **uploads}
+    # Reuse last successful payload for convenience on repeated runs,
+    # especially for file params that are cumbersome to re-upload every time.
+    merged_payload = _latest_payload_for_tool(tool_id)
+    merged_payload.update(payload)
+    merged_payload.update(uploads)
     if request.form:
-        merged_payload.update(request.form.to_dict())
+        form_values = {
+            key: value
+            for key, value in request.form.to_dict().items()
+            if value not in ("", None)
+        }
+        merged_payload.update(form_values)
     try:
         args = _coerce_args(tool_meta, merged_payload)
     except ValueError as exc:
