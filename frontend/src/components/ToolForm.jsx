@@ -50,7 +50,9 @@ export function ToolForm({ tool, onSubmit, rememberedValues, onValuesChange, loa
       .filter((param) => param.required)
       .filter((param) => {
         const value = values[param.name];
-        if (param.type === "file") return !(value instanceof File) && typeof value !== "string";
+        if (param.type === "file") {
+          return !(value instanceof File) && !(typeof value === "string" && value.trim());
+        }
         return value === undefined || value === null || value === "";
       })
       .map((param) => param.name);

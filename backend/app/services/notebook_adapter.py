@@ -245,6 +245,7 @@ def build_densenet121(num_classes: int = 14):
 
 def train_model(model, train_loader, val_loader, num_epochs: int = 5, lr: float = 1e-4, progress_callback: Callable[[int, str | None], None] | None = None):
     _require_torch()
+    device = next(model.parameters()).device
     criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", patience=2, factor=0.5)
@@ -254,8 +255,8 @@ def train_model(model, train_loader, val_loader, num_epochs: int = 5, lr: float 
         model.train()
         train_loss = 0.0
         for images, labels, _ in train_loader:
-            images = images.to(next(model.parameters()).device)
-            labels = labels.to(next(model.parameters()).device)
+            images = images.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True)
             optimizer.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, labels)
@@ -270,8 +271,8 @@ def train_model(model, train_loader, val_loader, num_epochs: int = 5, lr: float 
         all_labels: list[np.ndarray] = []
         with torch.no_grad():
             for images, labels, _ in val_loader:
-                images = images.to(next(model.parameters()).device)
-                labels = labels.to(next(model.parameters()).device)
+                images = images.to(device, non_blocking=True)
+                labels = labels.to(device, non_blocking=True)
                 outputs = model(images)
                 loss = criterion(outputs, labels)
                 val_loss += float(loss.item())
@@ -527,9 +528,18 @@ class NotebookService:
         return loaded
 
     def health(self) -> dict[str, Any]:
+        cuda_available = bool(torch is not None and torch.cuda.is_available())
+        gpu_name = None
+        if cuda_available:
+            try:
+                gpu_name = torch.cuda.get_device_name(0)
+            except Exception:
+                gpu_name = "Unknown CUDA device"
         return {
             "source_file": str(config.source_notebook_path),
             "torch_available": torch is not None,
+            "cuda_available": cuda_available,
+            "gpu_name": gpu_name,
             "artifacts_dir": str(config.outputs_dir),
             "state": self.state.snapshot(),
         }
@@ -733,6 +743,11 @@ class NotebookService:
     def train_model_workflow(self, image_dir: str, epochs: int = 5, lr: float = 1e-4, batch_size: int = 32, progress_callback: Callable[[int, str | None], None] | None = None) -> dict[str, Any]:
         _require_torch()
         train_df, val_df, _, resolved_image_dir = self._ensure_splits_for_image_dir(image_dir)
+        use_cuda = torch.cuda.is_available()
+        if not use_cuda:
+            raise RuntimeError(
+                "CUDA GPU is required for Train Model. Install a CUDA-enabled PyTorch build and verify your GPU is available."
+            )
         train_transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.RandomHorizontalFlip(),
@@ -747,10 +762,22 @@ class NotebookService:
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
-        train_loader = DataLoader(ChestXrayDataset(train_df, resolved_image_dir, train_transform), batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=False)
-        val_loader = DataLoader(ChestXrayDataset(val_df, resolved_image_dir, val_test_transform), batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=False)
+        train_loader = DataLoader(
+            ChestXrayDataset(train_df, resolved_image_dir, train_transform),
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=0,
+            pin_memory=use_cuda,
+        )
+        val_loader = DataLoader(
+            ChestXrayDataset(val_df, resolved_image_dir, val_test_transform),
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=0,
+            pin_memory=use_cuda,
+        )
         model = self.state.get_runtime("model") or build_densenet121(num_classes=NUM_CLASSES)
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = "cuda" if use_cuda else "cpu"
         model = model.to(device)
         history = train_model(model, train_loader, val_loader, num_epochs=epochs, lr=lr, progress_callback=progress_callback)
         self.state.set_runtime("model", model)
